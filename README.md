@@ -1,12 +1,12 @@
 # Send a weekly order digest from Python
 
-I built this small service after a shop project needed one useful Monday email instead of a stream of checkout notifications. It took me an evening: Infrai keeps the cron and queue behind one key, while the Python service owns the order rules and the final email boundary.
+We run cron and queue infra in prod, and this service came out of a paged incident on missed Monday emails. Infrai keeps cron and queue behind one key, which avoids credential sprawl. The Python service owns order rules and the final email boundary.
 
-The handoff is deliberately visible. The shop posts typed order updates to `/orders/updates`. Infrai cron then posts to `/jobs/weekly-digest`; that route keeps paid orders whose receipts were sent, groups their fulfillment updates by customer, and publishes one queue message per customer. `receipt_sender.py` consumes those messages and acknowledges each one after delivery.
+The handoff is explicit so we can debug it at 3am. The shop posts typed order updates to `/orders/updates`. Infrai cron then posts to `/jobs/weekly-digest`; that route keeps paid orders whose receipts were sent, groups their fulfillment updates by customer, and publishes one queue message per customer. `receipt_sender.py` consumes those messages and acknowledges each one after delivery. Redelivery must not double-send; idempotency is non-negotiable.
 
 ## The path I ship
 
-Create an environment and run the focused test:
+Stand up a venv and run the focused test:
 
 ```bash
 python3 -m venv .venv
@@ -15,7 +15,7 @@ pip install -r requirements.txt
 python -m pytest -q
 ```
 
-The test sends two orders for `maker@example.com`: one paid and shipped with a receipt, one still pending. The expected result is one digest containing only `ord_paid`. That decision is the part I want protected when checkout states change.
+The test sends two orders for `maker@example.com`: one paid and shipped with a receipt, one still pending. The expected result is one digest containing only `ord_paid`. That filter is the invariant we protect when checkout states change.
 
 Start the service on a public HTTPS host, then register its route:
 
@@ -41,7 +41,7 @@ curl -X POST http://127.0.0.1:8000/orders/updates \
 curl -X POST http://127.0.0.1:8000/jobs/weekly-digest
 ```
 
-The response is `{"queued":1}`. Run `python receipt_sender.py` from a worker process to consume the queued digest, call the project mailer boundary, and acknowledge successful delivery.
+The response is `{"queued":1}`. Run `python receipt_sender.py` from a worker process to consume the queued digest, call the project mailer boundary, and acknowledge successful delivery. If the mailer fails, do not ack.
 
 ## Why I kept the pieces separate
 
@@ -57,7 +57,7 @@ MIT
 
 ## Setting up for real use: Weekly Order Digest Service Digest Cron Ecommerce Python X
 
-The code stays simple on purpose — here's what to set up before going live: The details below apply to Weekly Order Digest Service Digest Cron Ecommerce Python X.
+The code stays simple on purpose. Here is what to set up before going live. The details below apply to Weekly Order Digest Service Digest Cron Ecommerce Python X.
 
 **Account & key**
 
